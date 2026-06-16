@@ -17,6 +17,11 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /************ type definition  ***********************/
 
+    enum AuctionState {
+        Active,
+        Canceled,
+        Sold
+    }
     
     /**
      * @dev 拍卖结构体
@@ -31,7 +36,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
         uint256 highestBidUSD;    // 当前最高出价（美元数量，8位小数精度）
         address highestBidder;    // 当前最高出价者账户地址
         uint256 endTime;          // 拍卖结束时间
-        bool active;              // 是否激活
+        AuctionState state;       // 是否激活
     }
 
     /************ state variables  ***********************/
@@ -52,16 +57,21 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     ///@notice 拍卖上架事件
     event AuctionAdded(uint auctionId, uint tokenId);
 
+    ///@notice 拍卖紧急取消事件
+    event AuctionCanceled(uint auctionId);
+
+    ///@notice 拍卖失败事件（流拍）
+    event AuctionFailed(uint auctionId);
+
+    ///@notice 拍卖成功事件
+    event AuctionSuccess(uint auctionId, address indexed winner, uint256 bidPrice);
+
+
     ///@notice 价格预言机更新事件
     event PriceOracleUpdated(address indexed newOracle);
 
     /************ modifiers ***********************/
 
-    ///@notice 限制只有 owner 可以调用的 modifier
-    modifier onlyOwnerOverride() {
-        require(owner() == msg.sender, "AuctionHouse: caller is not the owner");
-        _;
-    }
 
     /************ constructor  ***********************/
 
@@ -103,6 +113,9 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param startPrice the start price（起拍价）
     /// @param duration the duration （拍卖持续时间，单位：秒数）
     function addAuction(uint tokenId, address payTokenAddress, uint startPrice, uint duration) external {
+        require(payTokenAddress != address(0), "AuctionHouse: payTokenAddress is zero");
+        require(payTokenAddress != ETH_ADDRESS, "AuctionHouse: payTokenAddress is ETH_ADDRESS");
+
         require(IERC721(nftContractAddress).ownerOf(tokenId) == msg.sender, "AuctionHouse: token owner is not the caller");
 
         auctions[auctionNextId] = Auction({
@@ -115,9 +128,13 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             highestBidUSD: 0,
             highestBidder: address(0),
             endTime: block.timestamp + duration,
-            active: true
+            state: AuctionState.Active
         });
         auctionNextId++;
+
+        // 授权拍卖合约可以转移 NFT
+        ERC721(nftContractAddress).approve(address(this), tokenId);
+
         emit AuctionAdded(auctionNextId, tokenId);
     }
 
@@ -126,9 +143,10 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @param bidPrice the bid price（代币数量，按代币自身精度）
     function placeBid(uint auctionId, uint bidPrice) external payable {
         Auction storage auction = auctions[auctionId];
-        require(auction.active, "AuctionHouse: auction is not active");
+        require(auction.state == AuctionState.Active, "AuctionHouse: auction is not active");
         require(block.timestamp < auction.endTime, "AuctionHouse: auction is over");
         require(auction.highestBidder != msg.sender, "AuctionHouse: already the highest bidder");
+        require(auction.seller != msg.sender, "AuctionHouse: seller can't bid on his own auction");
 
         // 确定本次竞价使用的支付币种
         address payToken;
@@ -153,9 +171,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             // 存在历史最高出价 → 需比较 USD 价值
             address highestPayToken = auction.payTokenAddress;
             if (auction.highestBid > 0 && auction.highestBidder != address(0)) {
-                // 若最高出价是 ETH（payTokenAddress 为 ETH_ADDRESS 或 auction 的 payTokenAddress 指向 ETH）
-                // 但实际上 Auction 的 payTokenAddress 存的是 ERC20 地址，ETH 竞价时需特殊处理：
-                // 这里通过 priceOracle 将历史最高出价也换算成 USD
+                // 根据 highestPayToken 和 highestBid 换算历史最高出价的USD价值
                 uint256 highestUSD = priceOracle.convertToUSD(highestPayToken, auction.highestBid);
                 require(bidUSD > highestUSD, "AuctionHouse: bid too low in USD value");
             }
@@ -181,35 +197,70 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
         // ETH 支付已在 msg.value 中自动转入
     }
 
+    /// @notice 紧急取消拍卖(例如拍卖内容涉嫌法律问题)；如果有人出价，退还竞价款
+    /// @param auctionId the auction ID
+    function cancelAuction(uint auctionId) external onlyOwner {
+        Auction storage auction = auctions[auctionId];
+        
+        // 标记拍卖已取消
+        auction.state = AuctionState.Canceled;
+        
+        // 取消拍卖合约的授权
+        ERC721(nftContractAddress).approve(address(0), auction.tokenId);
+
+        // 有人出价，退还竞价款
+        if (auction.highestBidder != address(0)){
+            _refundBidder(auction);
+        }
+
+        // 紧急取消事件
+        emit AuctionCanceled(auctionId);
+    }
+
     /// @notice 结算拍卖
     /// @param auctionId the auction ID
     function settleAuction(uint auctionId) external {
         Auction storage auction = auctions[auctionId];
-        require(auction.active, "AuctionHouse: auction is not active");
-        uint bidPrice = auction.highestBid;
-        require(bidPrice > 0, "AuctionHouse: no bid placed");
+
         require(block.timestamp >= auction.endTime, "AuctionHouse: auction not ended");
-        require(auction.highestBidder != address(0), "AuctionHouse: highest bidder is empty");
-        require(auction.highestBidder != auction.seller, "AuctionHouse: highest bidder is the seller");
+        require(auction.state == AuctionState.Active, "AuctionHouse: auction is not active");
 
-        // 标记拍卖已结束
-        auction.active = false;
+        if (auction.highestBidder == address(0)){
+            // 没有出价，拍卖失败
+            ERC721(nftContractAddress).approve(address(0), auction.tokenId);
+            emit AuctionFailed(auctionId);
+            return;
+        }else{
+            // 有人出价，拍卖成功
+            emit AuctionSuccess(auctionId, auction.highestBidder, auction.highestBid);
+            
+            uint bidPrice = auction.highestBid;
 
-        // 转移 NFT 给最高出价者
-        IERC721(nftContractAddress).safeTransferFrom(auction.seller, auction.highestBidder, auction.tokenId);
+            require(bidPrice > 0, "AuctionHouse: no bid placed");
+            require(auction.highestBidder != address(0), "AuctionHouse: highest bidder is empty");
 
-        // 将竞价款转给卖家
-        address payToken = auction.payTokenAddress;
-        if (payToken == address(0) || payToken == ETH_ADDRESS) {
-            // ETH 支付 - 直接将合约中的 ETH 转给卖家
-            Address.sendValue(payable(auction.seller), bidPrice);
-        } else {
-            // ERC20 支付 - 将之前转入的代币转给卖家
-            require(
-                IERC20(payToken).transfer(auction.seller, bidPrice),
-                "AuctionHouse: ERC20 transfer to seller failed"
-            );
+            // 标记拍卖已结束
+            auction.state = AuctionState.Sold;
+
+            // 转移 NFT 给最高出价者(创建拍卖是已经approve授权)
+            IERC721(nftContractAddress).safeTransferFrom(auction.seller, auction.highestBidder, auction.tokenId);
+
+            // 将竞价款转给卖家
+            address payToken = auction.payTokenAddress;
+            if (payToken == address(0) || payToken == ETH_ADDRESS) {
+                // ETH 支付 - 直接将合约中的 ETH 转给卖家
+                Address.sendValue(payable(auction.seller), bidPrice);
+            } else {
+                // ERC20 支付 - 将之前转入的代币转给卖家
+                require(
+                    IERC20(payToken).transfer(auction.seller, bidPrice),
+                    "AuctionHouse: ERC20 transfer to seller failed"
+                );
+            }
+
         }
+
+        
     }
 
     /************ internal functions  ***********************/
