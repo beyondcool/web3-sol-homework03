@@ -173,15 +173,16 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             }
         }
 
+        // 更新最高出价
+        auction.highestBid = bidPrice;
+        auction.highestBidUSD = bidUSD;
+        auction.highestBidder = msg.sender;
+        
         // 退还前一个最高出价者（仅当之前有人出价且不是同一人时）
         if (auction.highestBidder != address(0) && auction.highestBidder != msg.sender) {
             _refundBidder(auction);
         }
 
-        // 更新最高出价
-        auction.highestBid = bidPrice;
-        auction.highestBidUSD = bidUSD;
-        auction.highestBidder = msg.sender;
 
         // 如果是 ERC20 支付，立即将代币转入本合约
         if (msg.value == 0) {
