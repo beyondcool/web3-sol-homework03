@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
-
+import "./IPriceOracle.sol";
 /**
  * @title PriceOracle
  * @notice Chainlink 价格预言机，用于查询 ETH 和 ERC20 代币兑美元的价格
  * @dev 通过 Chainlink 的 AggregatorV3Interface 获取链上价格数据
  *      所有价格均以 8 位小数返回（即 1 USD = 100000000）
  */
-contract PriceOracle {
+contract PriceOracle is IPriceOracle {
     struct FeedCfg {
         bool initialized;
         address feedAddress;

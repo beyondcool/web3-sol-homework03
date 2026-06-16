@@ -4,16 +4,17 @@ pragma solidity ^0.8.28;
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "./PriceOracle.sol";
+import "./dataFeed/IPriceOracle.sol";
 
 // ETH 占位地址（与 PriceOracle.ETH_ADDRESS 保持一致）
 address constant ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
+contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuard {
 
     /************ type definition  ***********************/
 
@@ -50,7 +51,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     mapping(uint => Auction) public auctions;
 
     ///@notice 价格预言机合约地址
-    PriceOracle public priceOracle;
+    IPriceOracle public priceOracle;
 
     /************ events ***********************/
 
@@ -93,7 +94,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     function setPriceOracle(address oracle) external onlyOwner {
         require(oracle != address(0), "AuctionHouse: invalid oracle address");
         require(oracle.code.length > 0, "AuctionHouse: oracle is not a contract");
-        priceOracle = PriceOracle(oracle);
+        priceOracle = IPriceOracle(oracle);
         emit PriceOracleUpdated(oracle);
     }
 
@@ -137,7 +138,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /// @notice 竞价（支持ETH支付和ERC20代币支付，两种支付均通过 PriceOracle 换算为USD进行比较）
     /// @param auctionId the auction ID
     /// @param bidPrice the bid price（代币数量，按代币自身精度）
-    function placeBid(uint auctionId, uint bidPrice) external payable {
+    function placeBid(uint auctionId, uint bidPrice) external payable nonReentrant {
         Auction storage auction = auctions[auctionId];
         require(auction.state == AuctionState.Active, "AuctionHouse: auction is not active");
         require(block.timestamp < auction.endTime, "AuctionHouse: auction is over");
@@ -173,16 +174,22 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             }
         }
 
+        // --- Effects：先更新状态 ---
+        // 保存旧出价者信息用于后续退款
+        address previousBidder = auction.highestBidder;
+        uint256 previousBid = auction.highestBid;
+
         // 更新最高出价
         auction.highestBid = bidPrice;
         auction.highestBidUSD = bidUSD;
         auction.highestBidder = msg.sender;
-        
-        // 退还前一个最高出价者（仅当之前有人出价且不是同一人时）
-        if (auction.highestBidder != address(0) && auction.highestBidder != msg.sender) {
-            _refundBidder(auction);
-        }
 
+        // --- Interactions：再执行外部调用 ---
+
+        // 退还前一个最高出价者
+        if (previousBidder != address(0) && previousBidder != msg.sender) {
+            _refundBidder(auction.payTokenAddress, previousBidder, previousBid);
+        }
 
         // 如果是 ERC20 支付，立即将代币转入本合约
         if (msg.value == 0) {
@@ -196,7 +203,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /// @notice 紧急取消拍卖(例如拍卖内容涉嫌法律问题)；如果有人出价，退还竞价款
     /// @param auctionId the auction ID
-    function cancelAuction(uint auctionId) external onlyOwner {
+    function cancelAuction(uint auctionId) external onlyOwner nonReentrant {
         Auction storage auction = auctions[auctionId];
         
         // 标记拍卖已取消
@@ -204,7 +211,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
         
         // 有人出价，退还竞价款
         if (auction.highestBidder != address(0)){
-            _refundBidder(auction);
+            _refundBidder(auction.payTokenAddress, auction.highestBidder, auction.highestBid);
         }
 
         // 紧急取消事件
@@ -213,7 +220,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /// @notice 结算拍卖
     /// @param auctionId the auction ID
-    function settleAuction(uint auctionId) external {
+    function settleAuction(uint auctionId) external nonReentrant {
         Auction storage auction = auctions[auctionId];
 
         require(block.timestamp >= auction.endTime, "AuctionHouse: auction not ended");
@@ -259,18 +266,18 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
     /************ internal functions  ***********************/
 
     /// @notice 退还前一个最高出价者的资金
-    /// @param auction 拍卖存储引用
-    function _refundBidder(Auction storage auction) private {
-        address payToken = auction.payTokenAddress;
-        uint256 previousBid = auction.highestBid;
-
+    /// @param payToken 支付代币地址
+    /// @param bidder 出价者地址
+    /// @param amount 退款金额
+    function _refundBidder(address payToken, address bidder, uint256 amount) private {
         if (payToken == address(0) || payToken == ETH_ADDRESS) {
             // 退还 ETH
-            payable(auction.highestBidder).transfer(previousBid);
+            Address.sendValue(payable(bidder), amount);
+            // payable(bidder).transfer(amount);
         } else {
             // 退还 ERC20 代币
             require(
-                IERC20(payToken).transfer(auction.highestBidder, previousBid),
+                IERC20(payToken).transfer(bidder, amount),
                 "AuctionHouse: ERC20 refund failed"
             );
         }

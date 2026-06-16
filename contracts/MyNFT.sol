@@ -4,21 +4,18 @@ pragma solidity ^0.8.28;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
 
 /**
  * @title MyNFT contract
  * @author zhouhe
  * @notice 实现NFT的铸造、转移、设置URI等操作
  */
-contract MyNFT is  Ownable, ERC721, ERC721URIStorage {
+contract MyNFT is  ERC721, ERC721URIStorage, Ownable {
 
-    /// @notice 已铸造的NFT数量
-    uint256 public totalSupply;    
+    uint256 public currentMaxTokenId;    
 
 
     constructor() Ownable(msg.sender) ERC721("My NFT", "MNFT"){
-
     }
 
     function supportsInterface(bytes4 interfaceId) public view virtual override(ERC721, ERC721URIStorage) returns (bool) {
@@ -34,16 +31,16 @@ contract MyNFT is  Ownable, ERC721, ERC721URIStorage {
     /// @notice 铸造NFT
     /// @param to the recipient of the token
     function mint(address to) external onlyOwner() {
-        uint tokenId = totalSupply++;
-        _mint(to, tokenId);
+        uint tokenId = currentMaxTokenId++;
+        _safeMint(to, tokenId);
     }
 
     /// @notice 铸造NFT并设置URI
     /// @param to the recipient of the token
     /// @param uri the token URI
     function mintWithUri(address to, string memory uri) external onlyOwner() {
-        uint tokenId = totalSupply++;
-        _mint(to, tokenId);
+        uint tokenId = currentMaxTokenId++;
+        _safeMint(to, tokenId);
         _setTokenURI(tokenId, uri);
     }
 
@@ -51,8 +48,7 @@ contract MyNFT is  Ownable, ERC721, ERC721URIStorage {
     /// @param tokenId the token ID
     /// @param uri the token URI
     /// @dev 只有NFT的者才能设置URI
-    function setTokenURI(uint256 tokenId, string memory uri) external {
-        require(ownerOf(tokenId) == msg.sender, "NFTAuction: token owner is not the caller");
+    function setTokenURI(uint256 tokenId, string memory uri) external onlyOwner {
         _setTokenURI(tokenId, uri);
     }
 
