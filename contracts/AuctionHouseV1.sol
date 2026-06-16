@@ -14,7 +14,7 @@ import "./dataFeed/IPriceOracle.sol";
 // ETH 占位地址（与 PriceOracle.ETH_ADDRESS 保持一致）
 address constant ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuard {
+contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, ReentrancyGuard {
 
     /************ type definition  ***********************/
 
@@ -92,8 +92,8 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     /// @notice 设置价格预言机地址
     /// @param oracle 价格预言机合约地址
     function setPriceOracle(address oracle) external onlyOwner {
-        require(oracle != address(0), "AuctionHouse: invalid oracle address");
-        require(oracle.code.length > 0, "AuctionHouse: oracle is not a contract");
+        require(oracle != address(0), "AuctionHouseV1: invalid oracle address");
+        require(oracle.code.length > 0, "AuctionHouseV1: oracle is not a contract");
         priceOracle = IPriceOracle(oracle);
         emit PriceOracleUpdated(oracle);
     }
@@ -101,12 +101,16 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     /// @notice 升级检查，出现异常会阻断升级
     /// @param newImplementation the new implementation address
     function _authorizeUpgrade(address newImplementation) internal virtual override {
-        require(msg.sender == owner(), "AuctionHouse: only owner can authorize upgrade");
-        require(newImplementation != address(0), "AuctionHouse: new implementation address is zero");
-        require(newImplementation.code.length > 0, "AuctionHouse: new implementation is not a contract");
+        require(msg.sender == owner(), "AuctionHouseV1: only owner can authorize upgrade");
+        require(newImplementation != address(0), "AuctionHouseV1: new implementation address is zero");
+        require(newImplementation.code.length > 0, "AuctionHouseV1: new implementation is not a contract");
     }
 
     /** ******************************* 业务逻辑 ********************************************* */
+    
+    function AuctionHouseVersion() external pure virtual returns (string memory) {
+        return "1.0";
+    }
 
     /// @notice 上架拍卖（卖家需先将tokenId授权给拍卖合约）
     /// @param tokenId the token ID（拍卖品的TokenID）
@@ -114,10 +118,10 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     /// @param startPrice the start price（起拍价）
     /// @param duration the duration （拍卖持续时间，单位：秒数）
     function addAuction(uint tokenId, address payTokenAddress, uint startPrice, uint duration) external {
-        require(payTokenAddress != address(0), "AuctionHouse: payTokenAddress is zero");
-        require(payTokenAddress != ETH_ADDRESS, "AuctionHouse: payTokenAddress is ETH_ADDRESS");
+        require(payTokenAddress != address(0), "AuctionHouseV1: payTokenAddress is zero");
+        require(payTokenAddress != ETH_ADDRESS, "AuctionHouseV1: payTokenAddress is ETH_ADDRESS");
 
-        require(IERC721(nftContractAddress).ownerOf(tokenId) == msg.sender, "AuctionHouse: token owner is not the caller");
+        require(IERC721(nftContractAddress).ownerOf(tokenId) == msg.sender, "AuctionHouseV1: token owner is not the caller");
 
         auctions[auctionNextId] = Auction({
             payTokenAddress: payTokenAddress,
@@ -140,29 +144,29 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     /// @param bidPrice the bid price（代币数量，按代币自身精度）
     function placeBid(uint auctionId, uint bidPrice) external payable nonReentrant {
         Auction storage auction = auctions[auctionId];
-        require(auction.state == AuctionState.Active, "AuctionHouse: auction is not active");
-        require(block.timestamp < auction.endTime, "AuctionHouse: auction is over");
-        require(auction.highestBidder != msg.sender, "AuctionHouse: already the highest bidder");
-        require(auction.seller != msg.sender, "AuctionHouse: seller can't bid on his own auction");
+        require(auction.state == AuctionState.Active, "AuctionHouseV1: auction is not active");
+        require(block.timestamp < auction.endTime, "AuctionHouseV1: auction is over");
+        require(auction.highestBidder != msg.sender, "AuctionHouseV1: already the highest bidder");
+        require(auction.seller != msg.sender, "AuctionHouseV1: seller can't bid on his own auction");
 
         // 确定本次竞价使用的支付币种
         address payToken;
         if (msg.value > 0) {
             // 用 ETH 支付
-            require(msg.value == bidPrice, "AuctionHouse: msg.value != bidPrice");
-            require(bidPrice > 0, "AuctionHouse: bidPrice is zero");
+            require(msg.value == bidPrice, "AuctionHouseV1: msg.value != bidPrice");
+            require(bidPrice > 0, "AuctionHouseV1: bidPrice is zero");
             payToken = ETH_ADDRESS;
         } else {
             // 用 ERC20 代币支付
             payToken = auction.payTokenAddress;
-            require(payToken != address(0), "AuctionHouse: payToken not set");
-            require(IERC20(payToken).balanceOf(msg.sender) >= bidPrice, "AuctionHouse: insufficient balance");
-            require(IERC20(payToken).allowance(msg.sender, address(this)) >= bidPrice, "AuctionHouse: insufficient allowance");
+            require(payToken != address(0), "AuctionHouseV1: payToken not set");
+            require(IERC20(payToken).balanceOf(msg.sender) >= bidPrice, "AuctionHouseV1: insufficient balance");
+            require(IERC20(payToken).allowance(msg.sender, address(this)) >= bidPrice, "AuctionHouseV1: insufficient allowance");
         }
 
         // 通过 PriceOracle 将 bidPrice 换算成 USD，确保新出价 > 当前最高出价（以 USD 计价）
         uint256 bidUSD = priceOracle.convertToUSD(payToken, bidPrice);
-        require(bidUSD > 0, "AuctionHouse: bid USD value is zero");
+        require(bidUSD > 0, "AuctionHouseV1: bid USD value is zero");
 
         if (auction.highestBidder != address(0)) {
             // 存在历史最高出价 → 需比较 USD 价值
@@ -170,7 +174,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             if (auction.highestBid > 0 && auction.highestBidder != address(0)) {
                 // 根据 highestPayToken 和 highestBid 换算历史最高出价的USD价值
                 uint256 highestUSD = priceOracle.convertToUSD(highestPayToken, auction.highestBid);
-                require(bidUSD > highestUSD, "AuctionHouse: bid too low in USD value");
+                require(bidUSD > highestUSD, "AuctionHouseV1: bid too low in USD value");
             }
         }
 
@@ -195,7 +199,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
         if (msg.value == 0) {
             require(
                 IERC20(payToken).transferFrom(msg.sender, address(this), bidPrice),
-                "AuctionHouse: transferFrom failed"
+                "AuctionHouseV1: transferFrom failed"
             );
         }
         // ETH 支付已在 msg.value 中自动转入
@@ -223,8 +227,8 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
     function settleAuction(uint auctionId) external nonReentrant {
         Auction storage auction = auctions[auctionId];
 
-        require(block.timestamp >= auction.endTime, "AuctionHouse: auction not ended");
-        require(auction.state == AuctionState.Active, "AuctionHouse: auction is not active");
+        require(block.timestamp >= auction.endTime, "AuctionHouseV1: auction not ended");
+        require(auction.state == AuctionState.Active, "AuctionHouseV1: auction is not active");
 
         if (auction.highestBidder == address(0)){
             // 没有出价，拍卖失败
@@ -236,8 +240,8 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             
             uint bidPrice = auction.highestBid;
 
-            require(bidPrice > 0, "AuctionHouse: no bid placed");
-            require(auction.highestBidder != address(0), "AuctionHouse: highest bidder is empty");
+            require(bidPrice > 0, "AuctionHouseV1: no bid placed");
+            require(auction.highestBidder != address(0), "AuctionHouseV1: highest bidder is empty");
 
             // 标记拍卖已结束
             auction.state = AuctionState.Sold;
@@ -254,7 +258,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
                 // ERC20 支付 - 将之前转入的代币转给卖家
                 require(
                     IERC20(payToken).transfer(auction.seller, bidPrice),
-                    "AuctionHouse: ERC20 transfer to seller failed"
+                    "AuctionHouseV1: ERC20 transfer to seller failed"
                 );
             }
 
@@ -278,7 +282,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable, Re
             // 退还 ERC20 代币
             require(
                 IERC20(payToken).transfer(bidder, amount),
-                "AuctionHouse: ERC20 refund failed"
+                "AuctionHouseV1: ERC20 refund failed"
             );
         }
     }
