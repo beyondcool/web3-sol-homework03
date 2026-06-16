@@ -107,7 +107,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
     /** ******************************* 业务逻辑 ********************************************* */
 
-    /// @notice 上架拍卖
+    /// @notice 上架拍卖（卖家需先将tokenId授权给拍卖合约）
     /// @param tokenId the token ID（拍卖品的TokenID）
     /// @param payTokenAddress the pay token address（竞价：除ETH以外，还支持一种ERC20 token代币）
     /// @param startPrice the start price（起拍价）
@@ -130,12 +130,8 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             endTime: block.timestamp + duration,
             state: AuctionState.Active
         });
-        auctionNextId++;
-
-        // 授权拍卖合约可以转移 NFT
-        ERC721(nftContractAddress).approve(address(this), tokenId);
-
         emit AuctionAdded(auctionNextId, tokenId);
+        auctionNextId++;
     }
 
     /// @notice 竞价（支持ETH支付和ERC20代币支付，两种支付均通过 PriceOracle 换算为USD进行比较）
@@ -205,9 +201,6 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
         // 标记拍卖已取消
         auction.state = AuctionState.Canceled;
         
-        // 取消拍卖合约的授权
-        ERC721(nftContractAddress).approve(address(0), auction.tokenId);
-
         // 有人出价，退还竞价款
         if (auction.highestBidder != address(0)){
             _refundBidder(auction);
@@ -227,7 +220,6 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
 
         if (auction.highestBidder == address(0)){
             // 没有出价，拍卖失败
-            ERC721(nftContractAddress).approve(address(0), auction.tokenId);
             emit AuctionFailed(auctionId);
             return;
         }else{
@@ -242,7 +234,7 @@ contract AuctionHouse is  Initializable, OwnableUpgradeable, UUPSUpgradeable {
             // 标记拍卖已结束
             auction.state = AuctionState.Sold;
 
-            // 转移 NFT 给最高出价者(创建拍卖是已经approve授权)
+            // 转移 NFT 给最高出价者（卖家已通过 setApprovalForAll 授权拍卖合约）
             IERC721(nftContractAddress).safeTransferFrom(auction.seller, auction.highestBidder, auction.tokenId);
 
             // 将竞价款转给卖家
