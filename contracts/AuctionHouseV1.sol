@@ -84,9 +84,10 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     /************ functions  ***********************/
 
     /// @notice 初始化合约，设置合约的owner为msg.sender
-    function initialize(address myNftAddr) external initializer {
+    function initialize(address myNftAddr, IPriceOracle _priceOracle) external initializer {
         __Ownable_init(msg.sender);
         nftContractAddress = myNftAddr;
+        priceOracle = _priceOracle;
     }
 
     /// @notice 设置价格预言机地址

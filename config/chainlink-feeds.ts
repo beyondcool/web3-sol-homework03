@@ -87,19 +87,3 @@ export function getFeedsByNetwork(networkName: string): FeedEntry[] {
       return [];
   }
 }
-
-/**
- * 根据网络名和代币符号/地址查找 Feed
- */
-export function findFeed(
-  networkName: string,
-  tokenAddressOrSymbol: string
-): FeedEntry | undefined {
-  const feeds = getFeedsByNetwork(networkName);
-  const lower = tokenAddressOrSymbol.toLowerCase();
-  return feeds.find(
-    (f) =>
-      f.symbol.toLowerCase() === lower ||
-      f.tokenAddress.toLowerCase() === lower
-  );
-}

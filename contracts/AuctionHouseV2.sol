@@ -12,7 +12,7 @@ contract AuctionHouseV2 is AuctionHouseV1 {
     /************ functions  ***********************/
 
     /// @notice 初始化合约，设置合约的owner为msg.sender
-    function initialize() external reinitializer(2) {
+    function initializeV2() external reinitializer(2) {
     }
 
     function AuctionHouseVersion() external pure virtual override returns (string memory) {
