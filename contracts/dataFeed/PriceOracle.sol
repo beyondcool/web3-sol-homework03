@@ -11,7 +11,8 @@ contract PriceOracle is IPriceOracle {
     struct FeedCfg {
         bool initialized;
         address feedAddress;
-        uint8 decimals;
+        uint8 decimals;      // 代币精度（如 ETH=18, USDC=6）
+        uint8 feedDecimals;  // Feed 价格精度（如 USD 计价对为 8）
     }
     /// @notice 查询价格时若价格 <= 0 或已过期则回滚
     uint256 public constant STALE_PRICE_TIMEOUT = 1 hours;
@@ -28,7 +29,7 @@ contract PriceOracle is IPriceOracle {
     mapping(address => FeedCfg) public feedConfigs;
 
     /// @notice 设置 Feed 事件
-    event FeedSet(address indexed token, address indexed feed, uint8 decimals);
+    event FeedSet(address indexed token, address indexed feed, uint8 decimals, uint8 feedDecimals);
 
     /// @notice 移除 Feed 事件
     event FeedRemoved(address indexed token);
@@ -43,14 +44,22 @@ contract PriceOracle is IPriceOracle {
         require(token != address(0), "PriceOracle: invalid token address");
         require(feed != address(0), "PriceOracle: invalid feed address");
         require(decimal > 0, "PriceOracle: invalid decimals");
-        
+
+        // 一次性从 feed 合约读取价格精度，避免每次 _getPrice 都调用
+        (bool decSuccess, bytes memory decData) = feed.staticcall(
+            abi.encodeWithSignature("decimals()")
+        );
+        require(decSuccess, "PriceOracle: feed decimals() call failed");
+        uint8 feedDec = abi.decode(decData, (uint8));
+
         feedConfigs[token] = FeedCfg({
             initialized: true,
             feedAddress: feed,
-            decimals: decimal
+            decimals: decimal,
+            feedDecimals: feedDec
         });
 
-        emit FeedSet(token, feed, decimal);
+        emit FeedSet(token, feed, decimal, feedDec);
     }
 
     /**
@@ -140,19 +149,14 @@ contract PriceOracle is IPriceOracle {
             (uint80, int256, uint256, uint256, uint80)
         );
 
+        // 价格需要足够新
         require(answer > 0, "PriceOracle: invalid price");
         require(
             block.timestamp - updatedAt < STALE_PRICE_TIMEOUT,
             "PriceOracle: stale price"
         );
-
+        // 返回值
         price = uint256(answer);
-
-        // 动态读取 feed 合约的 decimals，而非硬编码 8
-        (bool decSuccess, bytes memory decData) = feedAddr.staticcall(
-            abi.encodeWithSignature("decimals()")
-        );
-        require(decSuccess, "PriceOracle: failed to call decimals");
-        priceDecimals = abi.decode(decData, (uint8));
+        priceDecimals = feedConfigs[token].feedDecimals;
     }
 }
