@@ -5,7 +5,7 @@ import "./IPriceOracle.sol";
  * @title PriceOracle
  * @notice Chainlink 价格预言机，用于查询 ETH 和 ERC20 代币兑美元的价格
  * @dev 通过 Chainlink 的 AggregatorV3Interface 获取链上价格数据
- *      所有价格均以 8 位小数返回（即 1 USD = 100000000）
+ *      价格精度从 Feed 合约的 decimals() 动态读取（USD 计价对通常为 8 位小数）
  */
 contract PriceOracle is IPriceOracle {
     struct FeedCfg {
@@ -85,8 +85,8 @@ contract PriceOracle is IPriceOracle {
 
     /**
      * @notice 查询 ETH/USD 价格
-     * @return price  ETH/USD 价格，8 位小数（例如 2000.12345678 USD）
-     * @return decimals 价格精度，固定为 8
+     * @return price  ETH/USD 价格，精度由 Feed 合约决定
+     * @return decimals 价格精度，从 Feed 合约动态读取（USD 计价对通常为 8）
      */
     function getETHPriceInUSD() external view returns (uint256 price, uint8 decimals) {
         return _getPrice(ETH_ADDRESS);
@@ -95,8 +95,8 @@ contract PriceOracle is IPriceOracle {
     /**
      * @notice 查询指定 ERC20 代币/USD 价格
      * @param token ERC20 代币合约地址
-     * @return price    代币/USD 价格，8 位小数
-     * @return decimals 价格精度，固定为 8
+     * @return price    代币/USD 价格，精度由 Feed 合约决定
+     * @return decimals 价格精度，从 Feed 合约动态读取（USD 计价对通常为 8）
      */
     function getTokenPriceInUSD(address token) external view returns (uint256 price, uint8 decimals) {
         require(token != address(0), "PriceOracle: invalid token address");
@@ -147,6 +147,12 @@ contract PriceOracle is IPriceOracle {
         );
 
         price = uint256(answer);
-        priceDecimals = 8; // Chainlink 价格喂价合约返回 8 位小数
+
+        // 动态读取 feed 合约的 decimals，而非硬编码 8
+        (bool decSuccess, bytes memory decData) = feedAddr.staticcall(
+            abi.encodeWithSignature("decimals()")
+        );
+        require(decSuccess, "PriceOracle: failed to call decimals");
+        priceDecimals = abi.decode(decData, (uint8));
     }
 }
