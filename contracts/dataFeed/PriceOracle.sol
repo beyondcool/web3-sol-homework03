@@ -20,12 +20,6 @@ contract PriceOracle is IPriceOracle {
     /// @notice ETH 的特殊占位地址
     address public constant ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
-    // /// @notice token 地址 => Chainlink feed 合约地址
-    // mapping(address => address) public feeds;
-
-    // /// @notice token 地址 => 代币精度（如 ETH=18, USDC=6）
-    // mapping(address => uint8) public tokenDecimals;
-
     mapping(address => FeedCfg) public feedConfigs;
 
     /// @notice 设置 Feed 事件
