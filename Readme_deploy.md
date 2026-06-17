@@ -1,8 +1,10 @@
-# 1. localhost 本地节点
+# 部署文档
+
+## 1. localhost 本地节点
 
 运行 `npx hardhat node`，启动本地Node。
 
-## 1.1 首次部署，成功
+### 1.1 首次部署，成功
 
 ``` shell
 $ npx hardhat run scripts/deploy.local.ts --network localhost
@@ -27,7 +29,7 @@ $ npx hardhat run scripts/deploy.local.ts --network localhost
 zh@zhpc:~/work/web3-sol-homework03$ 
 ```
 
-## 1.2 升级到V2，成功
+### 1.2 升级到V2，成功
 
 修改`upgradeToV2.ts`中的`PROXY_ADDER`, 值为刚刚部署的`UUPSProxy`合约地址
 
@@ -50,7 +52,7 @@ zh@zhpc:~/work/web3-sol-homework03$
 zh@zhpc:~/work/web3-sol-homework03$
 ```
 
-## 1.3 重复运行升级到V2，按预期报错
+### 1.3 重复运行升级到V2，按预期报错
 
 修饰符 `reinitializer(2)` 发挥作用
 
@@ -83,9 +85,9 @@ ProviderError: VM Exception while processing transaction: reverted with custom e
 zh@zhpc:~/work/web3-sol-homework03$ 
 ```
 
-# 2. Sepolia 测试网
+## 2. Sepolia 测试网
 
-## 2.1 配置
+### 2.1 配置
 
 `hardhat.config.ts`的`networks`配置：
 
@@ -116,15 +118,13 @@ export SEPOLIA_PRIVATE_KEY='0x你的私钥'
 export ETHERSCAN_API_KEY='你的Etherscan API Key'
 ```
 
-
-
-## 2.2 部署
+### 2.2 部署
 
 ```bash
 npx hardhat run scripts/deploy.sepolia.ts --network sepolia
 ```
 
-## 2.3 验证合约
+### 2.3 验证合约
 
 验证合约（逐个）
 
@@ -142,7 +142,7 @@ npx hardhat verify --network sepolia <AuctionHouseV1地址>
 npx hardhat verify --network sepolia <UUPSProxy地址> <AuctionHouseV1地址> <initData十六进制>
 ```
 
-# 3. mainnet 主网
+## 3. mainnet 主网
 
 部署过程与部署sepolia相似，区别：
 
