@@ -152,26 +152,26 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         require(auction.highestBidder != msg.sender, "AuctionHouseV1: already the highest bidder");
         require(auction.seller != msg.sender, "AuctionHouseV1: seller can't bid on his own auction");
 
+
+        address payToken = (msg.value > 0) ? ETH_ADDRESS : auction.payTokenAddress;
+        // 通过 PriceOracle 将 bidPrice 换算成 USD，确保新出价 > 当前最高出价（以 USD 计价）
+        uint256 bidUSD = priceOracle.convertToUSD(payToken, bidPrice);
+        require(bidUSD > auction.startPrice, "AuctionHouseV1: bid USD value should gt startPrice");
+
+
         // 确定本次竞价使用的支付币种
-        address payToken;
         if (msg.value > 0) {
             auction.highestBidByEth = true;
             // 用 ETH 支付
             require(msg.value == bidPrice, "AuctionHouseV1: msg.value != bidPrice");
             require(bidPrice > 0, "AuctionHouseV1: bidPrice is zero");
-            payToken = ETH_ADDRESS;
         } else {
             auction.highestBidByEth = false;
             // 用 ERC20 代币支付
-            payToken = auction.payTokenAddress;
             require(payToken != address(0), "AuctionHouseV1: payToken not set");
             require(IERC20(payToken).balanceOf(msg.sender) >= bidPrice, "AuctionHouseV1: insufficient balance");
             require(IERC20(payToken).allowance(msg.sender, address(this)) >= bidPrice, "AuctionHouseV1: insufficient allowance");
         }
-
-        // 通过 PriceOracle 将 bidPrice 换算成 USD，确保新出价 > 当前最高出价（以 USD 计价）
-        uint256 bidUSD = priceOracle.convertToUSD(payToken, bidPrice);
-        require(bidUSD > auction.startPrice, "AuctionHouseV1: bid USD value should gt startPrice");
 
         if (auction.highestBidder != address(0)) {
             // 存在历史最高出价 → 需比较 USD 价值
