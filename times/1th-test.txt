@@ -1,0 +1,111 @@
+zh@zhpc:~/work/web3-sol-homework03$ npx hardhat test
+
+Compiled 2 Solidity files with solc 0.8.28 (evm target: cancun)
+
+Running Solidity tests
+
+
+Running Mocha tests
+
+
+  AuctionHouseV1 (通过 UUPS Proxy 交互)
+    版本 & 基本信息
+      ✔ AuctionHouseVersion 返回 '1.0'
+      ✔ nftContractAddress 返回 MyNFT 地址
+      ✔ priceOracle 返回 MockPriceOracle 地址
+      ✔ owner 应为部署者 (Account #0)
+      ✔ auctionNextId 初始为 0
+    setPriceOracle
+      ✔ owner 可以更新 priceOracle
+      ✔ 不能设置为零地址
+      ✔ 不能设置为非合约地址
+      ✔ 非 owner 调用应该 revert
+    addAuction
+      ✔ 成功上架拍卖（ERC20 支付）
+      ✔ payTokenAddress 为零地址应该 revert
+      ✔ payTokenAddress 为 ETH_ADDRESS 应该 revert
+      ✔ 非 token 持有者上架应该 revert
+    placeBid - ETH 竞价（单次出价）
+      ✔ ETH 竞价成功
+      ✔ msg.value != bidPrice 应该 revert
+      ✔ bidPrice 为 0 且 msg.value 为 0 时被 bid USD value should gt startPrice 拦截
+      ✔ 已是最高出价者不能再出价
+    placeBid - ERC20 竞价（完整流程）
+      ✔ ERC20 竞价成功（代币被转入合约）
+      ✔ 余额不足应该 revert
+      ✔ 授权不足应该 revert
+      ✔ 更高 ERC20 出价成功后，前一个出价者获得退款
+      ✔ 出价低于当前最高 USD 价值应该 revert（ERC20）
+    placeBid - 边界条件
+      ✔ 拍卖已结束后不能出价 (2034ms)
+      ✔ 卖家不能对自己的拍卖出价 (57ms)
+      ✔ 已取消的拍卖不能出价
+    cancelAuction
+      ✔ owner 可以取消拍卖（无出价）
+      ✔ owner 取消拍卖（有 ERC20 出价时退款） (45ms)
+      ✔ 非 owner 调用 cancelAuction 应该 revert
+    settleAuction
+      ✔ 无人出价时拍卖失败（emit AuctionFailed） (3043ms)
+      ✔ 拍卖未结束不能结算 (47ms)
+      ✔ 已取消的拍卖不能结算 (3026ms)
+      ✔ 有人出价时拍卖成功（ERC20支付）：NFT 转移给最高出价者，代币转给卖家 (6075ms)
+      ✔ 已结算的拍卖不能再次结算 (6094ms)
+
+  MockPriceOracle
+    常量
+      ✔ ETH_ADDRESS 应为标准 ETH 占位地址
+    setPrice
+      ✔ 设置代币价格后可通过 mockPrices 查询
+      ✔ 可以覆盖已设置的价格
+    setDecimals
+      ✔ 设置代币精度后可通过 tokenDecimals 查询
+      ✔ 设置 decimals 为 0 应该 revert
+      ✔ 可以覆盖已设置的精度
+    getETHPriceInUSD
+      ✔ 返回 ETH 价格和精度 8
+      ✔ ETH 价格未设置时应该 revert
+    getTokenPriceInUSD
+      ✔ 返回指定代币价格和精度 8
+      ✔ 传入零地址应该 revert
+      ✔ 价格未设置时应该 revert
+    convertToUSD
+      ✔ 正确换算 ETH 到 USD（18 位精度）
+      ✔ 正确换算 ERC20 到 USD（6 位精度，如 USDC）
+      ✔ 正确换算 ERC20 到 USD（18 位精度）
+      ✔ 价格为 0 时应该 revert
+      ✔ 金额为 0 时返回 0 USD
+
+  MyNFT
+    基本信息
+      ✔ name 应为 'My NFT'
+      ✔ symbol 应为 'MNFT'
+      ✔ owner 应为部署者 (Account #0)
+    mint
+      ✔ owner 可以为指定地址铸造 NFT
+      ✔ 非 owner 调用 mint 应该 revert
+      ✔ tokenId 从 0 开始递增
+    mintWithUri
+      ✔ owner 可以铸造 NFT 并设置 URI
+      ✔ 非 owner 调用 mintWithUri 应该 revert
+    setTokenURI
+      ✔ owner 可以设置已有 tokenId 的 URI
+      ✔ setTokenURI 可以多次覆盖 URI
+      ✔ 非 owner 调用 setTokenURI 应该 revert
+    currentMaxTokenId
+      ✔ 返回下一个将要铸造的 tokenId
+    继承的 ERC721 方法
+      ✔ ownerOf 返回正确持有者
+      ✔ balanceOf 返回正确数量
+      ✔ approve + getApproved 正常工作
+      ✔ transferFrom 可以转移 NFT
+      ✔ safeTransferFrom (无 data) 可以转移 NFT
+      ✔ setApprovalForAll + isApprovedForAll 正常工作
+      ✔ supportsInterface 返回正确的接口支持
+
+
+  68 passing (21s)
+
+
+68 passing (68 mocha)
+
+zh@zhpc:~/work/web3-sol-homework03$ 
