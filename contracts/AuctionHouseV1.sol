@@ -21,7 +21,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     enum AuctionState {
         Active,
         Canceled,
-        Sold
+        Finished
     }
     
     /**
@@ -33,6 +33,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         address nftContract;      // NFT合约地址 (拍卖品的)
         uint256 tokenId;          // NFT的TokenID (拍卖品的)
         uint256 startPrice;       // 起拍价
+        bool highestBidByEth;     // 当前最高出价用ETH支付（而不是ERC20代币）
         uint256 highestBid;       // 当前最高出价（代币数量，按代币自身精度）
         uint256 highestBidUSD;    // 当前最高出价（美元数量，8位小数精度）
         address highestBidder;    // 当前最高出价者账户地址
@@ -130,6 +131,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
             nftContract: nftContractAddress,
             tokenId: tokenId,
             startPrice: startPrice,
+            highestBidByEth:false, 
             highestBid: 0,
             highestBidUSD: 0,
             highestBidder: address(0),
@@ -153,11 +155,13 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         // 确定本次竞价使用的支付币种
         address payToken;
         if (msg.value > 0) {
+            auction.highestBidByEth = true;
             // 用 ETH 支付
             require(msg.value == bidPrice, "AuctionHouseV1: msg.value != bidPrice");
             require(bidPrice > 0, "AuctionHouseV1: bidPrice is zero");
             payToken = ETH_ADDRESS;
         } else {
+            auction.highestBidByEth = false;
             // 用 ERC20 代币支付
             payToken = auction.payTokenAddress;
             require(payToken != address(0), "AuctionHouseV1: payToken not set");
@@ -167,7 +171,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
 
         // 通过 PriceOracle 将 bidPrice 换算成 USD，确保新出价 > 当前最高出价（以 USD 计价）
         uint256 bidUSD = priceOracle.convertToUSD(payToken, bidPrice);
-        require(bidUSD > 0, "AuctionHouseV1: bid USD value is zero");
+        require(bidUSD > auction.startPrice, "AuctionHouseV1: bid USD value should gt startPrice");
 
         if (auction.highestBidder != address(0)) {
             // 存在历史最高出价 → 需比较 USD 价值
@@ -193,7 +197,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
 
         // 退还前一个最高出价者
         if (previousBidder != address(0) && previousBidder != msg.sender) {
-            _refundBidder(auction.payTokenAddress, previousBidder, previousBid);
+            _refundBidder(auction.highestBidByEth, auction.payTokenAddress, previousBidder, previousBid);
         }
 
         // 如果是 ERC20 支付，立即将代币转入本合约
@@ -216,7 +220,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         
         // 有人出价，退还竞价款
         if (auction.highestBidder != address(0)){
-            _refundBidder(auction.payTokenAddress, auction.highestBidder, auction.highestBid);
+            _refundBidder(auction.highestBidByEth, auction.payTokenAddress, auction.highestBidder, auction.highestBid);
         }
 
         // 紧急取消事件
@@ -232,6 +236,10 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         require(auction.state == AuctionState.Active, "AuctionHouseV1: auction is not active");
 
         if (auction.highestBidder == address(0)){
+
+            // 标记拍卖已结束
+            auction.state = AuctionState.Finished;
+
             // 没有出价，拍卖失败
             emit AuctionFailed(auctionId);
             return;
@@ -245,20 +253,19 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
             require(auction.highestBidder != address(0), "AuctionHouseV1: highest bidder is empty");
 
             // 标记拍卖已结束
-            auction.state = AuctionState.Sold;
+            auction.state = AuctionState.Finished;
 
             // 转移 NFT 给最高出价者（卖家已通过 setApprovalForAll 授权拍卖合约）
             IERC721(nftContractAddress).safeTransferFrom(auction.seller, auction.highestBidder, auction.tokenId);
 
             // 将竞价款转给卖家
-            address payToken = auction.payTokenAddress;
-            if (payToken == address(0) || payToken == ETH_ADDRESS) {
+            if (auction.highestBidByEth) {
                 // ETH 支付 - 直接将合约中的 ETH 转给卖家
                 Address.sendValue(payable(auction.seller), bidPrice);
             } else {
                 // ERC20 支付 - 将之前转入的代币转给卖家
                 require(
-                    IERC20(payToken).transfer(auction.seller, bidPrice),
+                    IERC20(auction.payTokenAddress).transfer(auction.seller, bidPrice),
                     "AuctionHouseV1: ERC20 transfer to seller failed"
                 );
             }
@@ -274,8 +281,8 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     /// @param payToken 支付代币地址
     /// @param bidder 出价者地址
     /// @param amount 退款金额
-    function _refundBidder(address payToken, address bidder, uint256 amount) private {
-        if (payToken == address(0) || payToken == ETH_ADDRESS) {
+    function _refundBidder(bool highestBidByEth, address payToken, address bidder, uint256 amount) private {
+        if (highestBidByEth) {
             // 退还 ETH
             Address.sendValue(payable(bidder), amount);
             // payable(bidder).transfer(amount);

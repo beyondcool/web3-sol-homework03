@@ -158,7 +158,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
     it("成功上架拍卖（ERC20 支付）", async function () {
       const erc20Addr = await erc20.getAddress();
       const tokenId = await mintAndApprove(seller);
-      const startPrice = ethers.parseEther("100");
+      const startPrice = ethers.parseUnits("100", 8);
 
       const tx = await auction.connect(seller).addAuction(tokenId, erc20Addr, startPrice, 3600);
       await expect(tx).to.emit(auction, "AuctionAdded");
@@ -213,7 +213,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     before(async function () {
       const erc20Addr = await erc20.getAddress();
-      auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
     });
 
     it("ETH 竞价成功", async function () {
@@ -223,12 +223,13 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
       const a = await auction.auctions(auctionId);
       expect(a.highestBidder).to.equal(bidder1.address);
       expect(a.highestBid).to.equal(bidPrice);
+      expect(a.highestBidByEth).to.equal(true);
       expect(a.state).to.equal(0n);
     });
 
     it("msg.value != bidPrice 应该 revert", async function () {
       const erc20Addr = await erc20.getAddress();
-      const id2 = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const id2 = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       const bidPrice = ethers.parseEther("2");
       await expect(
@@ -236,13 +237,13 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
       ).to.be.revertedWith("AuctionHouseV1: msg.value != bidPrice");
     });
 
-    it("bidPrice 为 0 且 msg.value 为 0 时被 bid USD value is zero 拦截", async function () {
+    it("bidPrice 为 0 且 msg.value 为 0 时被 bid USD value should gt startPrice 拦截", async function () {
       const erc20Addr = await erc20.getAddress();
-      const id2 = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const id2 = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       await expect(
         auction.connect(bidder2).placeBid(id2, 0n, { value: 0n })
-      ).to.be.revertedWith("AuctionHouseV1: bid USD value is zero");
+      ).to.be.revertedWith("AuctionHouseV1: bid USD value should gt startPrice");
     });
 
     it("已是最高出价者不能再出价", async function () {
@@ -258,7 +259,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     before(async function () {
       const erc20Addr = await erc20.getAddress();
-      auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
     });
 
     it("ERC20 竞价成功（代币被转入合约）", async function () {
@@ -274,6 +275,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
       const a = await auction.auctions(auctionId);
       expect(a.highestBidder).to.equal(bidder1.address);
       expect(a.highestBid).to.equal(bidPrice);
+      expect(a.highestBidByEth).to.equal(false);
     });
 
     it("余额不足应该 revert", async function () {
@@ -321,7 +323,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
   describe("placeBid - 边界条件", function () {
     it("拍卖已结束后不能出价", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 1);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 1);
 
       // 等待拍卖结束
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -334,7 +336,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("卖家不能对自己的拍卖出价", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       const bidPrice = ethers.parseEther("1");
       await expect(
@@ -344,7 +346,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("已取消的拍卖不能出价", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       await auction.connect(owner).cancelAuction(auctionId);
 
@@ -358,7 +360,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
   describe("cancelAuction", function () {
     it("owner 可以取消拍卖（无出价）", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       await expect(auction.connect(owner).cancelAuction(auctionId))
         .to.emit(auction, "AuctionCanceled")
@@ -370,7 +372,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("owner 取消拍卖（有 ERC20 出价时退款）", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       const bidPrice = ethers.parseEther("100");
       await erc20.connect(bidder1).approve(proxyAddress, bidPrice);
@@ -388,7 +390,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("非 owner 调用 cancelAuction 应该 revert", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       await expect(
         auction.connect(seller).cancelAuction(auctionId)
@@ -399,7 +401,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
   describe("settleAuction", function () {
     it("无人出价时拍卖失败（emit AuctionFailed）", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 2);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 2);
 
       await new Promise(resolve => setTimeout(resolve, 3000));
 
@@ -410,7 +412,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("拍卖未结束不能结算", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 3600);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 3600);
 
       await expect(
         auction.settleAuction(auctionId)
@@ -419,7 +421,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
 
     it("已取消的拍卖不能结算", async function () {
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 2);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 2);
       await new Promise(resolve => setTimeout(resolve, 3000));
       await auction.connect(owner).cancelAuction(auctionId);
 
@@ -432,7 +434,7 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
       this.timeout(15000);
 
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 5);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 5);
 
       const auctionData = await auction.auctions(auctionId);
       const tokenId = auctionData.tokenId;
@@ -453,14 +455,14 @@ describe("AuctionHouseV1 (通过 UUPS Proxy 交互)", function () {
       expect(sellerBalanceAfter - sellerBalanceBefore).to.equal(bidPrice);
 
       const a = await auction.auctions(auctionId);
-      expect(a.state).to.equal(2n); // Sold = 2
+      expect(a.state).to.equal(2n); // Finished = 2
     });
 
     it("已结算的拍卖不能再次结算", async function () {
       this.timeout(15000);
 
       const erc20Addr = await erc20.getAddress();
-      const auctionId = await createAuction(seller, erc20Addr, ethers.parseEther("100"), 5);
+      const auctionId = await createAuction(seller, erc20Addr, ethers.parseUnits("100", 8), 5);
 
       const bidPrice = ethers.parseEther("100");
       await erc20.connect(bidder1).approve(proxyAddress, bidPrice);
