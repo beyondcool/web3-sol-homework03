@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.28;
 import "./IPriceOracle.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 /**
  * @title PriceOracle
  * @notice Chainlink 价格预言机，用于查询 ETH 和 ERC20 代币兑美元的价格
  * @dev 通过 Chainlink 的 AggregatorV3Interface 获取链上价格数据
  *      价格精度从 Feed 合约的 decimals() 动态读取（USD 计价对通常为 8 位小数）
  */
-contract PriceOracle is IPriceOracle {
+contract PriceOracle is IPriceOracle, Ownable {
+    constructor() Ownable(msg.sender) {}
     struct FeedCfg {
         bool initialized;
         address feedAddress;
@@ -34,7 +36,7 @@ contract PriceOracle is IPriceOracle {
      * @param feed  Chainlink AggregatorV3Interface 合约地址
      * @param decimal 代币精度（e.g. 18 for ETH, 6 for USDC）
      */
-    function setFeed(address token, address feed, uint8 decimal) public {
+    function setFeed(address token, address feed, uint8 decimal) public onlyOwner {
         require(token != address(0), "PriceOracle: invalid token address");
         require(feed != address(0), "PriceOracle: invalid feed address");
         require(decimal > 0, "PriceOracle: invalid decimals");
@@ -60,7 +62,7 @@ contract PriceOracle is IPriceOracle {
      * @notice 移除某个代币的 feed 配置
      * @param token 代币合约地址
      */
-    function removeFeed(address token) external {
+    function removeFeed(address token) external onlyOwner {
         require(feedConfigs[token].initialized, "PriceOracle: feed not set");
         delete feedConfigs[token];
         emit FeedRemoved(token);
@@ -76,7 +78,7 @@ contract PriceOracle is IPriceOracle {
         address[] calldata tokens,
         address[] calldata feeds_,
         uint8[] calldata decimals
-    ) external {
+    ) external onlyOwner {
         require(
             tokens.length == feeds_.length && feeds_.length == decimals.length,
             "PriceOracle: array length mismatch"

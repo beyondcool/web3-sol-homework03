@@ -32,7 +32,7 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         address seller;           // 卖家账户地址
         address nftContract;      // NFT合约地址 (拍卖品的)
         uint256 tokenId;          // NFT的TokenID (拍卖品的)
-        uint256 startPrice;       // 起拍价
+        uint256 startPrice;       // 起拍价（以 USD 计价，8 位小数精度）
         bool highestBidByEth;     // 当前最高出价用ETH支付（而不是ERC20代币）
         uint256 highestBid;       // 当前最高出价（代币数量，按代币自身精度）
         uint256 highestBidUSD;    // 当前最高出价（美元数量，8位小数精度）
@@ -117,11 +117,12 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     /// @notice 上架拍卖（卖家需先将tokenId授权给拍卖合约）
     /// @param tokenId the token ID（拍卖品的TokenID）
     /// @param payTokenAddress the pay token address（竞价：除ETH以外，还支持一种ERC20 token代币）
-    /// @param startPrice the start price（起拍价）
-    /// @param duration the duration （拍卖持续时间，单位：秒数）
+    /// @param startPrice the start price（起拍价，以 USD 计价，8 位小数精度）
+    /// @param duration the duration （拍卖持续时间，单位：秒数，必须 > 0）
     function addAuction(uint tokenId, address payTokenAddress, uint startPrice, uint duration) external {
         require(payTokenAddress != address(0), "AuctionHouseV1: payTokenAddress is zero");
         require(payTokenAddress != ETH_ADDRESS, "AuctionHouseV1: payTokenAddress is ETH_ADDRESS");
+        require(duration > 0, "AuctionHouseV1: duration must be > 0");
 
         require(IERC721(nftContractAddress).ownerOf(tokenId) == msg.sender, "AuctionHouseV1: token owner is not the caller");
 
@@ -175,7 +176,8 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
 
         if (auction.highestBidder != address(0)) {
             // 存在历史最高出价 → 需比较 USD 价值
-            address highestPayToken = auction.payTokenAddress;
+            // 根据历史最高出价者的实际支付币种换算 USD（不能固定用 payTokenAddress）
+            address highestPayToken = auction.highestBidByEth ? ETH_ADDRESS : auction.payTokenAddress;
             if (auction.highestBid > 0 && auction.highestBidder != address(0)) {
                 // 根据 highestPayToken 和 highestBid 换算历史最高出价的USD价值
                 uint256 highestUSD = priceOracle.convertToUSD(highestPayToken, auction.highestBid);
@@ -184,9 +186,10 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
         }
 
         // --- Effects：先更新状态 ---
-        // 保存旧出价者信息用于后续退款
+        // 保存旧出价者信息用于后续退款（含其支付币种方式，避免被当前出价覆盖）
         address previousBidder = auction.highestBidder;
         uint256 previousBid = auction.highestBid;
+        bool previousBidByEth = auction.highestBidByEth;
 
         // 更新最高出价
         auction.highestBid = bidPrice;
@@ -195,9 +198,9 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
 
         // --- Interactions：再执行外部调用 ---
 
-        // 退还前一个最高出价者
+        // 退还前一个最高出价者（使用其本人的支付方式，而非当前出价者的方式）
         if (previousBidder != address(0) && previousBidder != msg.sender) {
-            _refundBidder(auction.highestBidByEth, auction.payTokenAddress, previousBidder, previousBid);
+            _refundBidder(previousBidByEth, auction.payTokenAddress, previousBidder, previousBid);
         }
 
         // 如果是 ERC20 支付，立即将代币转入本合约
@@ -213,8 +216,9 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     /// @notice 紧急取消拍卖(例如拍卖内容涉嫌法律问题)；如果有人出价，退还竞价款
     /// @param auctionId the auction ID
     function cancelAuction(uint auctionId) external onlyOwner nonReentrant {
-        Auction storage auction = auctions[auctionId];
         
+        Auction storage auction = auctions[auctionId];
+        require(auction.state == AuctionState.Active, "AuctionHouseV1: auction is not active");
         // 标记拍卖已取消
         auction.state = AuctionState.Canceled;
         
@@ -278,14 +282,14 @@ contract AuctionHouseV1 is  Initializable, OwnableUpgradeable, UUPSUpgradeable, 
     /************ internal functions  ***********************/
 
     /// @notice 退还前一个最高出价者的资金
-    /// @param payToken 支付代币地址
+    /// @param highestBidByEth 该出价者是否使用 ETH 支付
+    /// @param payToken 支付代币地址（仅 ERC20 退款时使用）
     /// @param bidder 出价者地址
     /// @param amount 退款金额
     function _refundBidder(bool highestBidByEth, address payToken, address bidder, uint256 amount) private {
         if (highestBidByEth) {
             // 退还 ETH
             Address.sendValue(payable(bidder), amount);
-            // payable(bidder).transfer(amount);
         } else {
             // 退还 ERC20 代币
             require(
